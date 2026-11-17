@@ -1,9 +1,7 @@
 "use client";
 
 import { createContext, createElement, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-
 import type { Session } from "@supabase/supabase-js";
-
 import { getSupabaseBrowserClient, getSupabaseMissingEnvMessage } from "@/src/lib/supabase/browser";
 
 type AdminAccessState =
@@ -48,7 +46,6 @@ type AdminAccessState =
       role: string;
     };
 
-// Internal hook that actually performs the fetching
 function useFetchAdminAccess(): AdminAccessState {
   const [state, setState] = useState<AdminAccessState>(() => {
     const msg = getSupabaseMissingEnvMessage();
@@ -83,7 +80,6 @@ function useFetchAdminAccess(): AdminAccessState {
     if (!supabaseClient) return;
 
     const supabase = supabaseClient;
-
     let cancelled = false;
 
     async function refresh(nextSession: Session | null, opts?: { keepStatus?: boolean }) {
@@ -91,8 +87,6 @@ function useFetchAdminAccess(): AdminAccessState {
 
       const prev = stateRef.current;
 
-      // When the browser regains focus, Supabase can emit token refresh events.
-      // We don't want to flash a loading state if we already know the user's access.
       const canKeepStatus =
         opts?.keepStatus === true &&
         (prev.status === "ready" || prev.status === "forbidden") &&
@@ -100,6 +94,7 @@ function useFetchAdminAccess(): AdminAccessState {
         prev.userId === nextSession.user.id;
 
       if (!nextSession) {
+        console.warn("[AdminAccess:Client] No browser session found -> unauthenticated");
         setState({
           status: "unauthenticated",
           message: "",
@@ -112,7 +107,6 @@ function useFetchAdminAccess(): AdminAccessState {
       }
 
       if (canKeepStatus) {
-        // Keep the prior status and role while we revalidate.
         setState((current) => {
           if (current.status !== "ready" && current.status !== "forbidden") return current;
           if (current.userId !== nextSession.user.id) return current;
@@ -130,28 +124,33 @@ function useFetchAdminAccess(): AdminAccessState {
       }
 
       const userId = nextSession.user.id;
-      const { data, error } = await supabase
-        .from("admin_users")
-        .select("user_id,role,disabled_at")
-        .eq("user_id", userId)
+      const userEmail = (nextSession.user.email ?? "").trim().toLowerCase();
+
+      let { data, error } = await supabase
+        .from("users")
+        .select("id, email, role")
+        .eq("id", userId)
         .maybeSingle();
+
+      if (!data && userEmail) {
+        const byEmail = await supabase
+          .from("users")
+          .select("id, email, role")
+          .eq("email", userEmail)
+          .maybeSingle();
+        data = byEmail.data;
+        error = byEmail.error;
+      }
 
       if (cancelled) return;
 
-      if (error) {
-        // Most likely RLS forbidding access because user isn't admin.
-        setState({
-          status: "forbidden",
-          message: "",
-          session: nextSession,
-          isAdmin: false,
+      if (error || !data || data.role !== "ADMIN") {
+        console.warn("[AdminAccess:Client] Access denied -> forbidden", {
           userId,
-          role: null,
+          userEmail,
+          dbRow: data ?? null,
+          dbError: error?.message ?? null,
         });
-        return;
-      }
-
-      if (!data || data.disabled_at) {
         setState({
           status: "forbidden",
           message: "",
@@ -162,6 +161,12 @@ function useFetchAdminAccess(): AdminAccessState {
         });
         return;
       }
+
+      console.log("[AdminAccess:Client] Access granted -> ready", {
+        userId,
+        email: data.email,
+        role: data.role,
+      });
 
       setState({
         status: "ready",
@@ -207,19 +212,9 @@ export function useAdminAccess(): AdminAccessState {
 }
 
 export function getAdminBootstrapSql(userId: string) {
-  return `-- 1) Allow a logged-in user to read their own admin row (required for the app to detect admin)
-do $$ begin
-  create policy admin_users_self_read
-  on public.admin_users
-  for select
-  to authenticated
-  using (user_id = auth.uid());
-exception when duplicate_object then null; end $$;
-
--- 2) Grant admin role to this user (idempotent)
-insert into public.admin_users (user_id, role)
-values ('${userId}', 'owner')
-on conflict (user_id)
-do update set role = excluded.role, disabled_at = null;
+  return `-- Asignar rol ADMIN en public.users
+UPDATE public.users
+SET role = 'ADMIN'
+WHERE id = '${userId}';
 `;
 }

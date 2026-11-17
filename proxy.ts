@@ -27,17 +27,12 @@ export function proxy(request: NextRequest) {
   const isPublicFile = PUBLIC_FILE_PATTERN.test(pathname);
   const hasAuthCookie = hasSupabaseAuthCookie(request);
 
-  // Bloquear acceso directo a /admin desde dominio principal
-  if (!isAdmin && (pathname.startsWith("/admin") || pathname.startsWith("/auth/admin"))) {
-    return NextResponse.redirect(new URL("/", request.url));
-  }
-
-  // Si NO es subdomain admin, dejar pasar normalmente
+  // En el dominio principal (localhost:3000), dejar pasar /admin hacia app/admin/layout.tsx
   if (!isAdmin) {
     return NextResponse.next();
   }
 
-  // Si ES subdomain admin, permitir acceso normal
+  // Si ES subdominio admin (admin.localhost:3000), permitir archivos públicos y auth
   if (
     pathname.startsWith("/auth/admin") ||
     pathname.startsWith("/favicon") ||
@@ -48,7 +43,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Si entra al subdominio admin sin sesion, forzar login antes de cualquier rewrite.
+  // Si entra al subdominio admin sin sesión, forzar login antes de cualquier rewrite
   if (!hasAuthCookie) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/auth/admin";
@@ -56,12 +51,12 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Rutas /admin en subdominio admin pasan directamente.
+  // Rutas /admin en subdominio admin pasan directamente
   if (pathname.startsWith("/admin")) {
     return NextResponse.next();
   }
 
-  // Reescribir rutas en el subdomain admin al /admin
+  // Reescribir rutas en el subdominio admin hacia /admin
   const url = request.nextUrl.clone();
   url.pathname = pathname === "/" ? "/admin" : `/admin${pathname}`;
 

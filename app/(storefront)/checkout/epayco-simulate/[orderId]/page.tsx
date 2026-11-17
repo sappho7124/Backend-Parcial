@@ -7,6 +7,13 @@ interface PageProps {
   params: Promise<{ orderId: string }>;
 }
 
+type SimulatedOrder = {
+  id: string;
+  total_amount: number | string;
+  metadata: Record<string, unknown> | null;
+  users: { email: string | null } | Array<{ email: string | null }> | null;
+};
+
 export default async function EpaycoSimulatePage({ params }: PageProps) {
   const { orderId } = await params;
 
@@ -22,15 +29,35 @@ export default async function EpaycoSimulatePage({ params }: PageProps) {
     );
   }
 
-  const { data: order } = await supabase
+  const { data, error } = await supabase
     .from("orders")
-    .select("id, order_number, total_cents, currency, email, metadata")
+    .select("id, total_amount, metadata, users(email)")
     .eq("id", orderId)
-    .maybeSingle();
+    .single();
 
-  if (!order) {
+  const order = data as SimulatedOrder | null;
+
+  if (error || !order) {
+    // eslint-disable-next-line no-console
+    if (error) console.error("[EpaycoSimulatePage] Error cargando orden:", error);
     notFound();
   }
+
+  // Lógica de metadatos
+  const currentMetadata =
+    order?.metadata && typeof order.metadata === "object"
+      ? (order.metadata as Record<string, unknown>)
+      : {};
+
+  const nextMetadata = {
+    ...currentMetadata,
+    payment_provider: "epayco",
+  };
+
+  await supabase
+    .from("orders")
+    .update({ metadata: nextMetadata })
+    .eq("id", orderId);
 
   // ePayco credentials from env
   const publicKey = process.env.EPAYCO_PUBLIC_KEY ?? "";
@@ -52,36 +79,28 @@ export default async function EpaycoSimulatePage({ params }: PageProps) {
     );
   }
 
-  // Extract customer info from metadata
-  let customerName = "";
-  try {
-    const meta = order.metadata as Record<string, unknown> | null;
-    if (meta && typeof meta === "object") {
-      customerName = (meta.customer_name as string) || "";
-    }
-  } catch {
-    // ignore
-  }
+  const relatedUserEmail = Array.isArray(order.users)
+    ? order.users[0]?.email
+    : order.users?.email;
 
-  // total_cents is stored in COP (base currency unit), not cents.
-  const amountCOP = typeof order.total_cents === "number" ? order.total_cents : 0;
-
-  const invoiceRef = `ORD-${String(order.order_number).padStart(6, "0")}`;
+  const amountCOP = Number(order.total_amount ?? 0);
+  const invoiceRef = `ORD-${order.id.slice(0, 8).toUpperCase()}`;
+  const userEmail = relatedUserEmail ?? "";
 
   const checkoutData = {
     name: `Pedido SwiftDrop ${invoiceRef}`,
     description: `Compra en SwiftDrop — ${invoiceRef}`,
     invoice: invoiceRef,
-    currency: (order.currency || "COP").toLowerCase(),
+    currency: "cop",
     amount: amountCOP.toFixed(2),
     tax_base: amountCOP.toFixed(2),
     tax: "0.00",
     country: "co",
     lang: "es",
-    external: "false", // false = checkout ePayco iframe/modal
-    confirmation: `${siteUrl}/api/epayco/confirm`,
-    response: `${siteUrl}/api/epayco/callback`,
-    email: order.email || "",
+    external: "false",
+    confirmation: `${siteUrl}/api/v1/payments/epayco-webhook`,
+    response: `${siteUrl}/order/success/${orderId}`,
+    email: userEmail,
     extra1: orderId,
     extra2: invoiceRef,
   };

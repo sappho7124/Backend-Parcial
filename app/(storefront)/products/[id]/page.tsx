@@ -1,52 +1,28 @@
 import type { Metadata } from "next";
 import { ProductDetailPage } from "@/src/features/products/details";
-import { getProductById } from "@/src/features/products/details/server/getProductById";
 import { buildStorefrontMetadata } from "@/src/lib/seo";
 
 type ProductPageProps = {
   params: Promise<{ id: string }>;
 };
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
   const { id } = await params;
-  const productId = Number(id);
-
-  if (!Number.isFinite(productId)) {
-    return buildStorefrontMetadata({
-      title: "Producto",
-      description: "Consulta los detalles, precio y disponibilidad de este producto.",
-      path: `/products/${id}`,
-      noIndex: true,
-    });
-  }
-
-  const product = await getProductById(productId);
-
-  if (!product) {
-    return buildStorefrontMetadata({
-      title: "Producto no disponible",
-      description: "Este producto no está disponible en este momento.",
-      path: `/products/${id}`,
-      noIndex: true,
-    });
-  }
-
   return buildStorefrontMetadata({
-    title: product.name,
-    description:
-      product.description ??
-      "Explora los detalles, materiales y tallas disponibles antes de comprar.",
+    title: "Detalle de Repuesto",
+    description: "Consulta especificaciones, peso logístico y disponibilidad.",
     path: `/products/${id}`,
   });
 }
 
 export default async function Page({ params }: ProductPageProps) {
   const { id } = await params;
-  const productId = Number(id);
 
-  if (!Number.isFinite(productId)) {
-    return <div className="px-6 py-24">Producto inválido.</div>;
+  if (!UUID_REGEX.test(id)) {
+    return <div className="px-6 py-24">ID de producto inválido (se requiere UUID).</div>;
   }
 
-  return <ProductDetailPage productId={productId} />;
+  return <ProductDetailPage productId={id} />;
 }

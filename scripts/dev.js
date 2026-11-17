@@ -12,7 +12,7 @@ function startNextDev() {
 
   nextProcess = spawn("next", ["dev"], {
     stdio: "inherit",
-    shell: false,
+    shell: true,
   });
 
   nextProcess.on("error", (error) => {

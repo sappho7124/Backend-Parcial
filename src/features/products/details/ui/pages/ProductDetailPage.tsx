@@ -4,7 +4,7 @@ import { getProductById } from "../../server/getProductById";
 import { getProducts } from "@/src/features/products/server/getProducts";
 import { ProductDetailClient } from "../client/ProductDetailClient";
 
-export async function ProductDetailPage({ productId }: { productId: number }) {
+export async function ProductDetailPage({ productId }: { productId: string }) {
   const product = await getProductById(productId);
   if (!product) notFound();
 
